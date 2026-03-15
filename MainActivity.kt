@@ -1,5 +1,6 @@
 package com.hesap.app
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -53,6 +55,37 @@ val TOPRAK_BUTON_BR  = Color(0xFF8B6914)
 val TOPRAK_VERSIYON  = Color(0xFF4A3520)
 val TOPRAK_DEVELOPED = Color(0xFF5A4530)
 
+const val PREFS_NAME = "hesapp_prefs"
+const val KEY_KOLON = "kolon_sayisi"
+
+fun saveData(context: Context, kolonSayisi: Int, satirValues: Array<Array<MutableState<String>>>, bitisCount: Array<Array<MutableState<Int>>>) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+    prefs.putInt(KEY_KOLON, kolonSayisi)
+    val rows = satirValues.size
+    for (row in 0 until rows) {
+        for (col in 0 until kolonSayisi) {
+            prefs.putString("val_${row}_${col}", satirValues[row][col].value)
+            prefs.putInt("bitis_${row}_${col}", bitisCount[row][col].value)
+        }
+    }
+    prefs.apply()
+}
+
+fun loadKolon(context: Context): Int {
+    return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getInt(KEY_KOLON, 0)
+}
+
+fun loadValues(context: Context, kolonSayisi: Int, rows: Int): Pair<Array<Array<String>>, Array<Array<Int>>> {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val vals = Array(rows) { row -> Array(kolonSayisi) { col -> prefs.getString("val_${row}_${col}", "") ?: "" } }
+    val bitis = Array(rows) { row -> Array(kolonSayisi) { col -> prefs.getInt("bitis_${row}_${col}", 0) } }
+    return Pair(vals, bitis)
+}
+
+fun clearData(context: Context) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,9 +101,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun HesapUygulamasi() {
-    var kolonSayisi by remember { mutableStateOf(0) }
+    val context = LocalContext.current
+    var kolonSayisi by remember { mutableStateOf(loadKolon(context)) }
     if (kolonSayisi == 0) KolonSecimEkrani { kolonSayisi = it }
-    else HesapTablosu(kolonSayisi = kolonSayisi, onReset = { kolonSayisi = 0 })
+    else HesapTablosu(kolonSayisi = kolonSayisi, onReset = {
+        clearData(context)
+        kolonSayisi = 0
+    })
 }
 
 @Composable
@@ -125,12 +162,25 @@ fun KolonButonu(label: String, onClick: () -> Unit) {
 @Composable
 fun HesapTablosu(kolonSayisi: Int, onReset: () -> Unit) {
     val INPUT_ROWS = 9
-    val satirValues = remember(kolonSayisi) { Array(INPUT_ROWS) { Array(kolonSayisi) { mutableStateOf("") } } }
-    val bitisCount = remember(kolonSayisi) { Array(INPUT_ROWS) { Array(kolonSayisi) { mutableStateOf(0) } } }
+    val context = LocalContext.current
+
+    val (savedVals, savedBitis) = remember { loadValues(context, kolonSayisi, INPUT_ROWS) }
+
+    val satirValues = remember(kolonSayisi) {
+        Array(INPUT_ROWS) { row -> Array(kolonSayisi) { col -> mutableStateOf(savedVals[row][col]) } }
+    }
+    val bitisCount = remember(kolonSayisi) {
+        Array(INPUT_ROWS) { row -> Array(kolonSayisi) { col -> mutableStateOf(savedBitis[row][col]) } }
+    }
     val focusRequesters = remember(kolonSayisi) { Array(INPUT_ROWS) { Array(kolonSayisi) { FocusRequester() } } }
 
     var showSifirlaDialog by remember { mutableStateOf(false) }
     var showGeriDonDialog by remember { mutableStateOf(false) }
+
+    // Her değişiklikte kaydet
+    LaunchedEffect(satirValues, bitisCount) {
+        saveData(context, kolonSayisi, satirValues, bitisCount)
+    }
 
     fun sifirla() {
         for (row in 0 until INPUT_ROWS)
@@ -138,6 +188,7 @@ fun HesapTablosu(kolonSayisi: Int, onReset: () -> Unit) {
                 satirValues[row][col].value = ""
                 bitisCount[row][col].value = 0
             }
+        saveData(context, kolonSayisi, satirValues, bitisCount)
     }
 
     val toplamlar by remember {
@@ -236,13 +287,17 @@ fun HesapTablosu(kolonSayisi: Int, onReset: () -> Unit) {
                     focusRequesters = focusRequesters,
                     row = row,
                     inputRows = INPUT_ROWS,
-                    onValueChange = { kolIdx, newVal -> satirValues[row][kolIdx].value = newVal },
+                    onValueChange = { kolIdx, newVal ->
+                        satirValues[row][kolIdx].value = newVal
+                        saveData(context, kolonSayisi, satirValues, bitisCount)
+                    },
                     onBitis = { kolIdx ->
                         when (bitisCount[row][kolIdx].value % 3) {
                             0 -> { satirValues[row][kolIdx].value = "-100"; bitisCount[row][kolIdx].value = 1 }
                             1 -> { satirValues[row][kolIdx].value = "-200"; bitisCount[row][kolIdx].value = 2 }
                             else -> { satirValues[row][kolIdx].value = ""; bitisCount[row][kolIdx].value = 0 }
                         }
+                        saveData(context, kolonSayisi, satirValues, bitisCount)
                     }
                 )
             }
